@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ s.name }}</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --text:#e6e8ee; --muted:#8a91a3; --line:#262a35;
+          --pos:#3ecf8e; --neg:#ff5d6c; --link:#4dc3ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width:1400px; margin:0 auto; padding:20px 16px; }
+  header { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; margin-bottom:14px; }
+  h1 { font-size:20px; margin:0; }
+  a { color:var(--link); text-decoration:none; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:18px; }
+  .wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; white-space:nowrap; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr:last-child td { border-bottom:none; }
+  .pos { color:var(--pos); } .neg { color:var(--neg); } .muted { color:var(--muted); }
+  .small { font-size:11px; color:var(--muted); }
+  .title { max-width:460px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:18px; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi .l { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .kpi .v { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .tab { padding:6px 12px; border:1px solid var(--line); border-radius:999px; color:var(--text); }
+  .tab.on { background:var(--text); color:var(--bg); border-color:var(--text); }
+  .pager { display:flex; gap:12px; align-items:center; margin-top:10px; }
+</style>
+</head>
+<body><main>
+  <header>
+    <h1>{{ s.name }}</h1>
+    <span class="small">bets placed since {{ strategy_start }} · after spread, slippage &amp; fees</span>
+    <a href="/">← Live dashboard</a>
+  </header>
+
+  {% macro money(x) %}{{ ("+$" if x >= 0 else "−$") ~ "{:,.0f}".format(x|abs) }}{% endmacro %}
+  <div class="kpis">
+    <div class="kpi"><div class="l">Won</div><div class="v pos">{{ "{:,}".format(groups.won|length) }}</div>
+      <div class="small">{{ money(won_pnl) }}</div></div>
+    <div class="kpi"><div class="l">Lost</div><div class="v neg">{{ "{:,}".format(groups.lost|length) }}</div>
+      <div class="small">{{ money(lost_pnl) }}</div></div>
+    <div class="kpi"><div class="l">Still open</div><div class="v">{{ "{:,}".format(groups.open|length) }}</div>
+      <div class="small">waiting for the market to settle</div></div>
+    <div class="kpi"><div class="l">Net</div>
+      <div class="v {{ 'pos' if won_pnl + lost_pnl > 0 else 'neg' }}">{{ money(won_pnl + lost_pnl) }}</div>
+      <div class="small">{% if s.settled %}{{ "%.0f"|format(s.win * 100) }}% won · fair price said {{ "%.0f"|format(s.fair * 100) }}%{% endif %}</div></div>
+  </div>
+
+  <section class="panel">
+    <div class="tabs">
+      {% for k, label in [("settled", "Settled"), ("won", "Won"), ("lost", "Lost"), ("open", "Open"), ("all", "All")] %}
+      <a class="tab {% if status == k %}on{% endif %}" href="?status={{ k }}">{{ label }} ({{ "{:,}".format(groups[k]|length) }})</a>
+      {% endfor %}
+    </div>
+    <div class="wrap"><table>
+      <tr><th>Placed</th><th>Market</th><th>Bet on</th><th class="num">Score</th><th class="num">Fair price</th>
+        <th class="num">Paid</th><th class="num">Profit / loss</th><th>Status</th></tr>
+      {% for b in bets %}
+      <tr>
+        <td class="muted">{{ b.opened_ts|clock }}</td>
+        <td class="title">{{ b.title }} <span class="small">{{ b.platform }}</span></td>
+        <td>{{ b.label }}</td>
+        <td class="num">{{ b.score|round|int }}</td>
+        <td class="num muted">{{ "%.0f"|format(b.mid * 100) }}¢</td>
+        <td class="num">{{ "%.0f"|format(b.paid * 100) }}¢</td>
+        <td class="num {% if b.pnl is not none %}{{ 'pos' if b.pnl > 0 else 'neg' if b.pnl < 0 else '' }}{% endif %}">
+          {% if b.pnl is not none %}{{ ("+$" if b.pnl >= 0 else "−$") ~ "%.2f"|format(b.pnl|abs) }}{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if b.status == 'won' else 'neg' if b.status == 'lost' else 'muted' }}">{{ b.status }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No bets here yet.</td></tr>
+      {% endfor %}
+    </table></div>
+    <div class="pager">
+      {% if page > 1 %}<a href="?status={{ status }}&page={{ page - 1 }}">← Newer</a>{% endif %}
+      <span class="small">Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}<a href="?status={{ status }}&page={{ page + 1 }}">Older →</a>{% endif %}
+    </div>
+    <div class="small" style="margin-top:8px">Fair price = the market's mid-price when the alert fired. Paid = what the bet actually cost
+      {%- if s.fill_rate is defined %} (your limit price; only orders that filled are shown){% endif %}.</div>
+  </section>
+</main></body>
+</html>

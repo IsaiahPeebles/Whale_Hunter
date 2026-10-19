@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local data (SQLite database grows by ~3 GB/day while running)
+data/
+
+# Large raw exports (~34 MB); the summary scorecard is kept
+export/*.csv
+
+# macOS
+.DS_Store
+
+# Local AI-assistant settings
+.claude/settings.local.json

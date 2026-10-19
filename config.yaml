@@ -1,0 +1,154 @@
+# All thresholds live here (CONTEXT §39.9). Dollar amounts are USD notional.
+db_path: data/whale.db
+
+poll_seconds: 20               # trade polling interval
+metadata_refresh_seconds: 300  # refresh metadata + snapshot for recently traded markets
+max_pages_per_poll: 30         # safety cap on trade paging per platform per poll
+
+baseline_days: 7
+trades_retention_days: 21     # older trades are deleted automatically (baselines use 7 days, outcomes 24h)
+min_baseline_trades: 50        # below this -> confidence LOW, "insufficient baseline"
+backfill_max_pages: 5          # one-time history backfill for a market that looks interesting
+
+# Only evaluate a market when its last-15m flow exceeds this. A noise floor, not a whale threshold.
+min_window_notional: 1000
+windows_minutes: [1, 5, 15]    # cluster windows; the strongest one becomes the event
+accumulation_minutes: 60
+
+store_threshold: 40            # alerts >= this are saved (dashboard)
+print_threshold: 75            # alerts >= this are printed to the terminal
+alert_cooldown_minutes: 30     # per market+direction; re-alert only if score rises by rescore_delta
+rescore_delta: 10
+
+# Whale Score weights (CONTEXT §15). Order-book & cross-market are deferred; weights renormalize.
+weights:
+  trade_size: 20
+  volume: 15
+  liquidity: 15
+  price: 15
+  aggression: 10
+  clustering: 10
+  accumulation: 5
+
+# Signal strength scaling (ratio -> 0..1 on a log scale, 1x = 0).
+scaling:
+  trade_size_full_ratio: 100   # largest trade / median trade
+  volume_full_ratio: 40        # window volume / normal window volume
+  cluster_full_ratio: 20       # cluster notional / p99 single trade
+  accumulation_full_ratio: 20  # 60m net directional flow / normal hourly volume
+  price_full_points: 15        # probability points moved in the event direction
+  liquidity_full_ratio: 0.5    # directional notional / liquidity
+
+severity:
+  - [90, "EXTREME WHALE ACTIVITY"]
+  - [75, "WHALE ACTIVITY"]
+  - [60, "UNUSUAL"]
+  - [40, "ELEVATED"]
+  - [0, "NORMAL"]
+
+# Benign-context labels (CONTEXT §29)
+near_close_minutes: 60
+new_market_hours: 24
+thin_market_5m_volume: 50
+
+# New / low-history / reactivated wallet large-position detection (CONTEXT §23). Polymarket only.
+wallet:
+  enabled: true
+  window_minutes: 60           # a wallet's position = its directional flow in this market over this window
+  min_position: 5000           # noise floor for a candidate position (USD)
+  min_position_vs_median: 25   # position must be >= this multiple of the market's median trade
+  new_wallet_days: 7           # first seen within this many days -> NEW WALLET
+  low_history_markets: 5       # <= this many markets traded (lifetime) -> LOW-HISTORY WALLET
+  dormant_days: 60             # gap since previous trade -> REACTIVATED WALLET
+  profile_ttl_hours: 6
+  max_profiles_per_cycle: 15   # API lookups per poll cycle
+  store_threshold: 55
+  high_threshold: 75
+  position_full_ratio: 500     # position / median trade at which the position component saturates
+  weights:
+    track_record: 30           # only present when the wallet has enough closed positions
+    newness: 25
+    position: 25
+    directional: 15
+    capital_concentration: 15
+    price: 10
+    liquidity: 10
+
+# Wallet track records from recent closed Polymarket positions (CONTEXT §24 historical performance).
+track:
+  max_positions: 200        # most recent closed positions evaluated per wallet
+  min_sample: 20            # fewer closed positions -> track record "unknown", never "bad"
+  min_invested: 5000        # ignore track records built on pocket change
+  roi_shrink: 30            # ROI is multiplied by n / (n + roi_shrink)
+  win_prior: 10             # win rate is shrunk toward 50% with this many pseudo-positions
+  roi_full: 0.15            # shrunk ROI at which the ROI half of strength saturates
+  proven_min_roi: 0.05      # shrunk ROI needed for PROVEN WALLET
+  proven_min_strength: 0.5
+  ttl_hours: 24
+  proven_min_position: 2000 # proven wallets are alerted on smaller positions, no median-multiple gate
+
+# Outcome tracking + paper trading (CONTEXT §36-37). Paper trades enter at the live ask when we
+# detect the alert (not the whale's price) and pay the spread again on time-based exits.
+paper:
+  min_score: 60             # alerts at or above this open a paper trade
+  stake: 100                # USD per paper trade
+  slippage: 0.01            # extra price paid on entry, on top of the ask
+  max_entry_price: 0.97     # skip entries with almost no upside
+  dedupe_hours: 6           # one paper trade per market + direction + alert kind in this window
+  resolution_check_minutes: 30
+  min_sample: 30            # report flags groups smaller than this as not meaningful
+
+# Taker fee per trade = contracts × rate × price × (1 − price). Settlement is free.
+# Kalshi: 0.07 (published). Polymarket: 0.04–0.07 by category (crypto 0.07, geopolitics 0); 0.05 is a middle estimate.
+fees:
+  kalshi: 0.07
+  polymarket: 0.05
+maker_fees:                   # resting (limit) orders: Kalshi charges 25% of the taker rate, Polymarket charges makers nothing
+  kalshi: 0.0175
+  polymarket: 0.0
+
+# Maker-entry simulation: post a buy at the bid when an alert fires; it only counts as filled if a
+# later trade goes *through* our price (we'd be at the back of the queue at our own price).
+maker:
+  fill_window_minutes: 15
+
+# Frozen strategy test (forward-only): only paper trades placed after `start` count, so results
+# can't be tuned to data we've already seen. Don't edit the rules mid-test; add a new test instead.
+strategies:
+  start: "2026-10-09 09:30"   # local time
+  rules:
+    - name: All alerts (control)
+    - name: Polymarket, score 75+
+      platform: polymarket
+      min_score: 75
+    - name: Score 90+
+      min_score: 90
+    - name: Proven wallets
+      wallet_class: PROVEN WALLET
+    - name: All alerts, maker
+      entry: maker
+    - name: Polymarket, score 75+, maker
+      platform: polymarket
+      min_score: 75
+      entry: maker
+    # Added 2026-10-09 evening: each has its own start, so the six above stay untouched.
+    # Prices are the fair price (mid) of the side we bet on.
+    - name: New wallets, favorites 60c+
+      start: "2026-10-09 19:45"
+      wallet_class: NEW WALLET
+      min_price: 0.60
+    - name: New wallets, 40c+
+      start: "2026-10-09 19:45"
+      wallet_class: NEW WALLET
+      min_price: 0.40
+    - name: Polymarket, 30-70c
+      start: "2026-10-09 19:45"
+      platform: polymarket
+      min_price: 0.30
+      max_price: 0.70
+    - name: Polymarket, score 75+, 30-70c
+      start: "2026-10-09 19:45"
+      platform: polymarket
+      min_score: 75
+      min_price: 0.30
+      max_price: 0.70

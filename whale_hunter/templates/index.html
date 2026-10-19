@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Whale Hunter</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --text:#e6e8ee; --muted:#8a91a3; --line:#262a35;
+          --extreme:#ff4d5e; --whale:#ff8a4d; --unusual:#f2c94c; --elevated:#4dc3ff;
+          --wallet:#d77cff; --pos:#3ecf8e; --neg:#ff5d6c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width:1400px; margin:0 auto; padding:20px 16px; }
+  header { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; margin-bottom:14px; }
+  h1 { font-size:20px; margin:0; }
+  h2 { font-size:13px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .meta { color:var(--muted); font-size:12px; }
+  a { color:var(--elevated); text-decoration:none; }
+
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:18px; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi .v { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .kpi .l { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .kpi .s { font-size:11px; color:var(--muted); }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+
+  .grid { display:grid; grid-template-columns:1fr; gap:18px; }
+  @media (min-width:1100px) { .grid.two { grid-template-columns:1fr 1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; min-width:0; }
+  .wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; white-space:nowrap; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr:last-child td { border-bottom:none; }
+  .sev { font-weight:600; font-size:12px; white-space:nowrap; }
+  .EXTREME { color:var(--extreme); } .WHALE { color:var(--whale); } .UNUSUAL { color:var(--unusual); } .ELEVATED { color:var(--elevated); }
+  .HIGH-SIGNIFICANCE, .NOTABLE, .wallet { color:var(--wallet); }
+  .pos { color:var(--pos); } .neg { color:var(--neg); } .muted { color:var(--muted); } .ctx { color:var(--unusual); }
+  .small { font-size:11px; color:var(--muted); }
+  .title { max-width:340px; }
+
+  details { border-bottom:1px solid var(--line); padding:7px 0; }
+  details:last-child { border-bottom:none; }
+  summary { cursor:pointer; list-style:none; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  summary::-webkit-details-marker { display:none; }
+  summary .score { font-weight:600; font-variant-numeric:tabular-nums; min-width:28px; }
+  details ul { margin:6px 0 4px; padding-left:18px; }
+</style>
+</head>
+<body><main>
+  <header>
+    <h1>Whale Hunter</h1>
+    <a href="/bets">All bets (won / lost) →</a>
+    <a href="/performance">Full performance + watchlist →</a>
+    <span class="meta">auto-refresh 30s · last {{ hours|int }}h · scores describe observed behavior, not intent</span>
+  </header>
+
+  <!-- Status strip -->
+  <div class="kpis">
+    <div class="kpi">
+      <div class="l">Collector</div>
+      <div class="v"><span class="dot" style="background:{{ 'var(--pos)' if kpi.alive else 'var(--neg)' }}"></span>{{ 'Live' if kpi.alive else 'Stopped' }}</div>
+      <div class="s">{% if kpi.last_cycle_ago is not none %}last cycle {{ kpi.last_cycle_ago|int }}s ago{% else %}never ran{% endif %}</div>
+    </div>
+    <div class="kpi"><div class="l">Trades / last hour</div><div class="v">{{ "{:,}".format(kpi.trades_1h) }}</div>
+      <div class="s">{% for s in stats %}{{ s.platform }} {{ s.last|clock }}{% if not loop.last %} · {% endif %}{% endfor %}</div></div>
+    <div class="kpi"><div class="l">Alerts</div><div class="v">{{ kpi.alerts }}</div><div class="s">{{ kpi.wallet_alerts }} wallet alerts</div></div>
+    <div class="kpi"><div class="l">Proven wallets</div><div class="v">{{ kpi.proven }}</div><div class="s">on watchlist</div></div>
+    <div class="kpi"><div class="l">Paper trades</div><div class="v">{{ kpi.paper_total }}</div><div class="s">{{ kpi.paper_resolved }} resolved</div></div>
+    <div class="kpi"><div class="l">Paper return · 6h exit</div>
+      <div class="v {% if kpi.paper_ret_6h is not none %}{{ 'pos' if kpi.paper_ret_6h > 0 else 'neg' }}{% endif %}">
+        {% if kpi.paper_ret_6h is not none %}{{ "%+.1f"|format(kpi.paper_ret_6h * 100) }}%{% else %}—{% endif %}</div>
+      <div class="s">avg per trade · n={{ kpi.paper_n_6h }}{% if kpi.paper_n_6h < min_sample %} (too few){% endif %}</div></div>
+    <div class="kpi"><div class="l">Paper return · resolution</div>
+      <div class="v {% if kpi.paper_ret_res is not none %}{{ 'pos' if kpi.paper_ret_res > 0 else 'neg' }}{% endif %}">
+        {% if kpi.paper_ret_res is not none %}{{ "%+.1f"|format(kpi.paper_ret_res * 100) }}%{% else %}—{% endif %}</div>
+      <div class="s">avg per trade · n={{ kpi.paper_resolved }}{% if kpi.paper_resolved < min_sample %} (too few){% endif %}</div></div>
+  </div>
+
+  <!-- The frozen forward test: the one table that answers "is there an edge?" -->
+  <section class="panel" style="margin-bottom:18px">
+    <h2>Strategy test · bets placed since {{ strategy_start }} · after spread, slippage &amp; fees</h2>
+    <div class="wrap"><table>
+      <tr><th>Strategy</th><th class="num">Bets</th><th class="num">Settled</th><th class="num">Won</th>
+        <th class="num">Fair price said</th><th class="num">Edge</th><th class="num">Net</th><th class="num">Return</th><th>Verdict so far</th></tr>
+      {% for s in strategies %}
+      <tr class="{% if s.settled < min_sample %}muted{% endif %}">
+        <td><a href="/strategy/{{ loop.index0 }}">{{ s.name }}</a>{% if s.start != strategy_start %}
+          <span class="small"> · since {{ s.start }}</span>{% endif %}{% if s.fill_rate is defined and s.fill_rate is not none %}
+          <span class="small"> · {{ "%.0f"|format(s.fill_rate * 100) }}% of orders filled</span>{% endif %}</td>
+        <td class="num">{{ "{:,}".format(s.bets) }}</td>
+        <td class="num">{{ "{:,}".format(s.settled) }}</td>
+        {% if s.settled %}
+        <td class="num">{{ "%.1f"|format(s.win * 100) }}%</td>
+        <td class="num">{{ "%.1f"|format(s.fair * 100) }}%</td>
+        <td class="num {{ 'pos' if s.edge > 0 else 'neg' }}">{{ "%+.1f"|format(s.edge * 100) }} <span class="small">± {{ "%.1f"|format(s.edge_2se * 100) }}</span></td>
+        <td class="num {{ 'pos' if s.pnl > 0 else 'neg' }}">{{ ("+$" if s.pnl >= 0 else "−$") ~ "{:,.0f}".format(s.pnl|abs) }}</td>
+        <td class="num {{ 'pos' if s.ret > 0 else 'neg' }}">{{ "%+.1f"|format(s.ret * 100) }}%</td>
+        <td class="small">
+          {% if s.settled < min_sample %}too few settled yet
+          {% elif s.ret > 0 and s.edge - s.edge_2se > 0 %}<span class="pos">promising, keep watching</span>
+          {% elif s.ret > 0 %}profitable, but could be luck
+          {% else %}losing after costs{% endif %}</td>
+        {% else %}
+        <td class="num muted" colspan="5">—</td><td class="small">no settled bets yet</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table></div>
+    <div class="small" style="margin-top:8px">Rules are frozen: only bets placed after the start count, so results can't be fitted to old data.
+      <b>Edge</b> = how much more often it won than the fair price predicted (± shows the margin of error).
+      A strategy is only interesting if it beats the control and stays positive for 2+ weeks.</div>
+  </section>
+
+  <div class="grid two">
+    <!-- Does following alerts make money? -->
+    <section class="panel">
+      <h2>Paper-trading scoreboard</h2>
+      <div class="wrap"><table>
+        <tr><th>Alert type</th><th class="num">Alerts</th>
+          {% for h in horizons %}<th class="num">{{ labels[h] }}</th>{% endfor %}</tr>
+        {% for g in scoreboard %}
+        <tr>
+          <td>{{ g.group }}</td><td class="num">{{ g.alerts }}</td>
+          {% for h in horizons %}{% set c = g.cols[h] %}
+          <td class="num {% if c.n_paper < min_sample %}muted{% endif %}">
+            {% if c.avg_ret is not none %}<span class="{{ 'pos' if c.avg_ret > 0 else 'neg' }}">{{ "%+.1f"|format(c.avg_ret * 100) }}%</span>
+            <div class="small">n={{ c.n_paper }} · hit {{ "%.0f"|format(c.hit * 100) }}%</div>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>{% endfor %}
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">No matured outcomes yet. 1h fills first; resolution can take days.</td></tr>
+        {% endfor %}
+      </table></div>
+      <div class="small" style="margin-top:8px">Average paper return per $ staked, entering at the live ask + slippage and paying the spread on exit.
+        Dimmed = fewer than {{ min_sample }} trades, too few to trust.</div>
+    </section>
+
+    <!-- Wallet alerts -->
+    <section class="panel">
+      <h2>Wallet alerts · new, reactivated, proven</h2>
+      <div class="wrap"><table>
+        <tr><th>Market</th><th>Wallet</th><th>Class</th><th>Side</th><th class="num">Position</th><th class="num">Score</th><th>When</th></tr>
+        {% for r in wallets %}
+        <tr>
+          <td class="title">{% if r.ev.url %}<a href="{{ r.ev.url }}" target="_blank">{{ r.title }}</a>{% else %}{{ r.title }}{% endif %}</td>
+          <td><a href="https://polymarket.com/profile/{{ r.wallet }}" target="_blank">{{ r.wallet[:8] }}…</a></td>
+          <td class="sev wallet">{{ r.ev.classes|join(', ')|replace(' WALLET', '') }}</td>
+          <td>{{ r.ev.direction_label }}</td>
+          <td class="num">${{ "{:,.0f}".format(r.ev.dir_notional) }}</td>
+          <td class="num">{{ r.score|round|int }}</td>
+          <td class="muted">{{ r.ts|clock }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">No wallet alerts yet.</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+  </div>
+
+  <!-- Every pretend bet -->
+  <section class="panel" style="margin-top:18px">
+    <h2>Pretend bets · ${{ "%.0f"|format(bets[0].stake if bets else 100) }} each ·
+      <span class="{{ 'pos' if kpi.bets_pnl > 0 else 'neg' if kpi.bets_pnl < 0 else '' }}">{{ "%+.2f"|format(kpi.bets_pnl)|replace('+', '+$')|replace('-', '−$') }}</span>
+      on the {{ bets|length }} most recent ·
+      <a href="/bets" style="text-transform:none; letter-spacing:0">see all bets, won &amp; lost →</a></h2>
+    <div class="wrap"><table>
+      <tr><th>Placed</th><th>Market</th><th>Bet on</th><th>Why</th><th class="num">Paid</th><th class="num">Now</th><th class="num">Up / down</th><th>Status</th></tr>
+      {% for b in bets %}
+      <tr>
+        <td class="muted">{{ b.opened_ts|clock }}</td>
+        <td class="title">{{ b.title }} <span class="small">{{ b.platform }}</span></td>
+        <td>{{ b.label }}</td>
+        <td class="muted">{{ b.source }} · score {{ b.score|round|int }}</td>
+        <td class="num">{{ "%.0f"|format(b.entry_price * 100) }}¢</td>
+        <td class="num">{% if b.now is not none %}{{ "%.0f"|format(b.now * 100) }}¢{% else %}—{% endif %}</td>
+        <td class="num {% if b.pnl is not none %}{{ 'pos' if b.pnl > 0 else 'neg' if b.pnl < 0 else '' }}{% endif %}">
+          {% if b.pnl is not none %}{{ "%+.2f"|format(b.pnl)|replace('+', '+$')|replace('-', '−$') }}{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if b.status == 'won' else 'neg' if b.status == 'lost' else 'muted' }}">{{ b.status }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No pretend bets yet. Alerts scoring 60+ place one.</td></tr>
+      {% endfor %}
+    </table></div>
+    <div class="small" style="margin-top:8px">Paid = the live asking price when we spotted the alert, plus 1¢ slippage.
+      Open bets show what selling right now would fetch (after the spread); settled bets pay $1 per share if they won, $0 if they lost.</div>
+  </section>
+
+  <div class="grid two" style="margin-top:18px">
+    <!-- Market ranking -->
+    <section class="panel">
+      <h2>Markets ranked by Whale Score</h2>
+      <div class="wrap"><table>
+        <tr><th>#</th><th>Market</th><th>Venue</th><th>Side</th><th class="num">Score</th><th>Severity</th><th>Conf.</th><th class="num">Price</th><th>When</th></tr>
+        {% for r in ranked %}
+        <tr>
+          <td class="muted">{{ loop.index }}</td>
+          <td class="title">{% if r.ev.url %}<a href="{{ r.ev.url }}" target="_blank">{{ r.title }}</a>{% else %}{{ r.title }}{% endif %}
+            <div class="small">{{ (r.ev.volume_text or '').split(' (')[0] }}</div></td>
+          <td>{{ r.platform }}</td>
+          <td>{{ r.direction }}</td>
+          <td class="num">{{ r.score|round|int }}</td>
+          <td class="sev {{ r.severity.split()[0] }}">{{ r.severity }}</td>
+          <td>{{ r.confidence }}</td>
+          <td class="num">{% if r.ev.price_from is not none %}{{ "%+.1f"|format((r.ev.price_to - r.ev.price_from) * 100) }}pt{% endif %}</td>
+          <td class="muted">{{ r.ts|clock }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="muted">No alerts yet — baselines are still warming up.</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+
+    <!-- Live feed, one line each; click to expand evidence -->
+    <section class="panel">
+      <h2>Live feed · click an alert for the evidence</h2>
+      {% for r in feed %}
+      <details>
+        <summary>
+          <span class="score sev {{ r.severity.split()[0] }}">{{ r.score|round|int }}</span>
+          <span class="sev {{ r.severity.split()[0] }}">{{ r.severity }}</span>
+          <span>{{ r.title }}</span>
+          <span class="muted">{{ r.ev.direction_label }} · {{ r.platform }} · {{ r.ts|clock }}</span>
+        </summary>
+        <div class="muted">{{ r.ev.detected }}</div>
+        <ul>
+          {% for w in r.ev.why %}<li>{{ w }}</li>{% endfor %}
+          {% for n in r.ev.notes %}<li class="muted">{{ n }}</li>{% endfor %}
+          {% for c in r.ev.context %}<li class="ctx">{{ c }}</li>{% endfor %}
+        </ul>
+        <div class="small">Confidence {{ r.confidence }}: {{ r.ev.confidence_reasons|join('; ') }}</div>
+      </details>
+      {% else %}
+      <div class="muted">Nothing yet.</div>
+      {% endfor %}
+    </section>
+  </div>
+
+  <div class="meta" style="margin-top:16px">First seen = first observed Polymarket activity, not wallet creation.
+    Unusual behavior is not evidence of private information. Past paper results do not guarantee future ones.</div>
+</main></body>
+</html>

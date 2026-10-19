@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<title>Signal Performance</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --text:#e6e8ee; --muted:#8a91a3; --line:#262a35;
+          --pos:#3ecf8e; --neg:#ff5d6c; --link:#4dc3ff; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width:1200px; margin:0 auto; padding:20px 16px; }
+  h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:28px 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .meta { color:var(--muted); font-size:12px; max-width:860px; }
+  .wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; white-space:nowrap; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .pos { color:var(--pos); } .neg { color:var(--neg); } .muted { color:var(--muted); }
+  .small { font-size:11px; color:var(--muted); }
+  a { color:var(--link); text-decoration:none; }
+</style>
+</head>
+<body><main>
+  <h1>Signal Performance <a href="/" style="font-size:13px; font-weight:400; margin-left:12px">← Live</a></h1>
+  <div class="meta">
+    {{ n_rows }} alerts with outcomes · {{ n_paper }} paper trades (${{ stake }} each).
+    <b>Move</b> = probability points in the alert's direction, measured from when we detected it.
+    <b>Hit</b> = share that moved that way. <b>Return</b> = paper P&amp;L per trade after entering at the live ask
+    (+slippage) and paying the spread again on time exits. Groups under {{ min_sample }} are dimmed: too small to trust.
+    Results here are historical associations, not a guarantee of future performance.
+  </div>
+
+  {% for name, groups in tables.items() %}
+  <h2>By {{ name|lower }}</h2>
+  <div class="wrap"><table>
+    <tr><th>Group</th><th class="num">Alerts</th>
+      {% for h in horizons %}<th class="num">{{ labels[h] }}: move · hit · return</th>{% endfor %}</tr>
+    {% for g in groups %}
+    <tr>
+      <td>{{ g.group }}</td><td class="num">{{ g.alerts }}</td>
+      {% for h in horizons %}{% set c = g.cols[h] %}
+      <td class="num {% if c.n < min_sample %}muted{% endif %}">
+        {% if c.n %}
+          <span class="{{ 'pos' if c.avg_move > 0 else 'neg' }}">{{ "%+.1f"|format(c.avg_move) }}pt</span>
+          · {{ "%.0f"|format(c.hit * 100) }}%
+          · {% if c.avg_ret is not none %}<span class="{{ 'pos' if c.avg_ret > 0 else 'neg' }}">{{ "%+.1f"|format(c.avg_ret * 100) }}%</span>{% else %}—{% endif %}
+          <div class="small">n={{ c.n }}{% if c.n_paper %}, paper {{ c.n_paper }}{% endif %}</div>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">No matured outcomes yet. The 5-minute horizon fills first; resolution can take days.</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endfor %}
+
+  <h2>Proven wallet watchlist (Polymarket)</h2>
+  <div class="meta">Profitable on their most recent closed positions after sample-size shrinkage. Their new positions
+    alert at smaller sizes. Past results do not guarantee future ones.</div>
+  <div class="wrap"><table>
+    <tr><th>Wallet</th><th>Name</th><th class="num">Strength</th><th class="num">Closed</th><th class="num">Profitable</th><th class="num">Realized P&amp;L</th><th class="num">ROI</th></tr>
+    {% for w in proven %}
+    <tr>
+      <td><a href="https://polymarket.com/profile/{{ w.wallet }}" target="_blank">{{ w.wallet[:12] }}…</a></td>
+      <td>{{ w.username or '' }}</td>
+      <td class="num">{{ "%.2f"|format(w.track_strength) }}</td>
+      <td class="num">{{ w.track_n }}</td>
+      <td class="num">{{ "%.0f"|format(w.track_wins / w.track_n * 100) }}%</td>
+      <td class="num">${{ "{:,.0f}".format(w.track_pnl) }}</td>
+      <td class="num">{{ "%+.1f"|format(w.track_pnl / w.track_invested * 100) }}%</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">None yet. Run <code>python -m whale_hunter.track seed</code>.</td></tr>
+    {% endfor %}
+  </table></div>
+</main></body>
+</html>

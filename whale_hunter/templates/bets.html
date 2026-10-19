@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pretend Bets</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --text:#e6e8ee; --muted:#8a91a3; --line:#262a35;
+          --pos:#3ecf8e; --neg:#ff5d6c; --link:#4dc3ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width:1400px; margin:0 auto; padding:20px 16px; }
+  header { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; margin-bottom:14px; }
+  h1 { font-size:20px; margin:0; }
+  h2 { font-size:13px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  a { color:var(--link); text-decoration:none; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:18px; }
+  .wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; white-space:nowrap; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr:last-child td { border-bottom:none; }
+  .pos { color:var(--pos); } .neg { color:var(--neg); } .muted { color:var(--muted); }
+  .small { font-size:11px; color:var(--muted); }
+  .title { max-width:420px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .tab { padding:6px 12px; border:1px solid var(--line); border-radius:999px; color:var(--text); }
+  .tab.on { background:var(--text); color:var(--bg); border-color:var(--text); }
+  .pager { display:flex; gap:12px; align-items:center; margin-top:10px; }
+  tfoot td { font-weight:600; border-top:1px solid var(--muted); }
+</style>
+</head>
+<body><main>
+  <header>
+    <h1>Pretend Bets</h1>
+    <a href="/">← Live dashboard</a>
+    <a href="/performance">Full performance →</a>
+  </header>
+
+  <section class="panel">
+    <h2>Settled bets · how much following each alert type made or lost</h2>
+    <div class="wrap"><table>
+      <tr><th>Alert type</th><th class="num">Settled</th><th class="num">Won</th><th class="num">Lost</th>
+        <th class="num">Win rate</th><th class="num">Avg price paid</th><th class="num">Staked</th><th class="num">Net profit</th><th class="num">Return</th></tr>
+      {% for r in summary %}
+      <tr class="{% if r.n < min_sample %}muted{% endif %}">
+        <td>{{ r.src }}</td>
+        <td class="num">{{ "{:,}".format(r.n) }}</td>
+        <td class="num pos">{{ "{:,}".format(r.won) }}</td>
+        <td class="num neg">{{ "{:,}".format(r.n - r.won) }}</td>
+        <td class="num">{{ "%.0f"|format(r.won / r.n * 100) }}%</td>
+        <td class="num">{{ "%.0f"|format(r.avg_paid * 100) }}¢</td>
+        <td class="num">${{ "{:,.0f}".format(r.staked) }}</td>
+        <td class="num {{ 'pos' if r.pnl > 0 else 'neg' }}">{{ ("+$" if r.pnl >= 0 else "−$") ~ "{:,.0f}".format(r.pnl|abs) }}</td>
+        <td class="num {{ 'pos' if r.pnl > 0 else 'neg' }}">{{ "%+.1f"|format(r.pnl / r.staked * 100) }}%</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted">No bets have settled yet.</td></tr>
+      {% endfor %}
+      {% if summary %}
+      <tfoot><tr>
+        <td>All</td><td class="num">{{ "{:,}".format(total.n) }}</td>
+        <td class="num pos">{{ "{:,}".format(total.won) }}</td><td class="num neg">{{ "{:,}".format(total.n - total.won) }}</td>
+        <td class="num">{{ "%.0f"|format(total.won / total.n * 100) }}%</td><td></td>
+        <td class="num">${{ "{:,.0f}".format(total.staked) }}</td>
+        <td class="num {{ 'pos' if total.pnl > 0 else 'neg' }}">{{ ("+$" if total.pnl >= 0 else "−$") ~ "{:,.0f}".format(total.pnl|abs) }}</td>
+        <td class="num {{ 'pos' if total.pnl > 0 else 'neg' }}">{{ "%+.1f"|format(total.pnl / total.staked * 100) }}%</td>
+      </tr></tfoot>
+      {% endif %}
+    </table></div>
+    <div class="small" style="margin-top:8px">A high win rate can still lose money: buying at 90¢ wins only 11¢ but loses 90¢.
+      Net profit is what counts. Dimmed = fewer than {{ min_sample }} settled bets.</div>
+  </section>
+
+  <section class="panel">
+    <div class="tabs">
+      {% for k, label in [("settled", "Settled"), ("won", "Won"), ("lost", "Lost"), ("open", "Open"), ("all", "All")] %}
+      <a class="tab {% if status == k %}on{% endif %}" href="/bets?status={{ k }}">{{ label }} ({{ "{:,}".format(counts[k]) }})</a>
+      {% endfor %}
+    </div>
+    <div class="wrap"><table>
+      <tr><th>Placed</th><th>Market</th><th>Bet on</th><th>Why</th><th class="num">Paid</th><th class="num">{{ 'Settled at' if status in ('won', 'lost', 'settled') else 'Now' }}</th><th class="num">Profit / loss</th><th>Status</th></tr>
+      {% for b in bets %}
+      <tr>
+        <td class="muted">{{ b.opened_ts|clock }}</td>
+        <td class="title">{{ b.title }} <span class="small">{{ b.platform }}</span></td>
+        <td>{{ b.label }}</td>
+        <td class="muted">{{ b.source }} · score {{ b.score|round|int }}</td>
+        <td class="num">{{ "%.0f"|format(b.entry_price * 100) }}¢</td>
+        <td class="num">{% if b.now is not none %}{{ "%.0f"|format(b.now * 100) }}¢{% else %}—{% endif %}</td>
+        <td class="num {% if b.pnl is not none %}{{ 'pos' if b.pnl > 0 else 'neg' if b.pnl < 0 else '' }}{% endif %}">
+          {% if b.pnl is not none %}{{ ("+$" if b.pnl >= 0 else "−$") ~ "%.2f"|format(b.pnl|abs) }}{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if b.status == 'won' else 'neg' if b.status == 'lost' else 'muted' }}">{{ b.status }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No bets here yet.</td></tr>
+      {% endfor %}
+    </table></div>
+    <div class="pager">
+      {% if page > 1 %}<a href="/bets?status={{ status }}&page={{ page - 1 }}">← Newer</a>{% endif %}
+      <span class="small">Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}<a href="/bets?status={{ status }}&page={{ page + 1 }}">Older →</a>{% endif %}
+    </div>
+  </section>
+</main></body>
+</html>
